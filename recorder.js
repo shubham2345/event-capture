@@ -547,6 +547,108 @@
     }
   }
 
+// Specialized function to capture form field data (textboxes and dropdowns)
+// This runs IN ADDITION to the regular event capture
+  function recordFormFieldData(event) {
+    if (!isRecording) return;
+    
+    const element = event.target;
+    const tagName = element.tagName.toLowerCase();
+    const inputType = element.type ? element.type.toLowerCase() : '';
+    
+    // Handle textboxes and textareas
+    if ((tagName === 'input' && ['text', 'email', 'password', 'search', 'tel', 'url', 'number'].includes(inputType)) || 
+        tagName === 'textarea') {
+      
+      const eventData = {
+        type: 'textInput',
+        timestamp: Date.now(),
+        url: window.location.href,
+        target: {
+          tag: element.tagName,
+          id: element.id || '',
+          class: element.className || '',
+          name: element.name || '',
+          placeholder: element.placeholder || '',
+          value: element.value || '',
+          inputType: tagName === 'textarea' ? 'textarea' : inputType,
+          xpath: getElementXPath(element),
+          cssPath: getElementCssPath(element),
+          bid: getStableBID(element),
+          a11y: getA11yIdentifiers(element),
+          isInteractive: true
+        }
+      };
+      
+      // Send to background script
+      chrome.runtime.sendMessage({
+        type: 'recordedEvent',
+        event: eventData
+      });
+      
+      events.push(eventData);
+      
+      console.log('Textbox input captured:', {
+        type: eventData.type,
+        value: eventData.target.value,
+        name: eventData.target.name,
+        id: eventData.target.id,
+        timestamp: new Date(eventData.timestamp).toISOString()
+      });
+    }
+    
+    // Handle dropdown (select) elements
+    else if (tagName === 'select') {
+      const selectedOption = element.options[element.selectedIndex];
+      
+      const eventData = {
+        type: 'dropdownSelect',
+        timestamp: Date.now(),
+        url: window.location.href,
+        target: {
+          tag: element.tagName,
+          id: element.id || '',
+          class: element.className || '',
+          name: element.name || '',
+          selectedValue: element.value || '',
+          selectedText: selectedOption ? selectedOption.text : '',
+          selectedIndex: element.selectedIndex,
+          xpath: getElementXPath(element),
+          cssPath: getElementCssPath(element),
+          bid: getStableBID(element),
+          a11y: getA11yIdentifiers(element),
+          isInteractive: true,
+          // Capture all options for context (static content only)
+          allOptions: Array.from(element.options).map((opt, idx) => ({
+            index: idx,
+            value: opt.value,
+            text: opt.text,
+            selected: opt.selected
+          }))
+        }
+      };
+      
+      // Send to background script
+      chrome.runtime.sendMessage({
+        type: 'recordedEvent',
+        event: eventData
+      });
+      
+      events.push(eventData);
+      
+      console.log('Dropdown selection captured:', {
+        type: eventData.type,
+        selectedValue: eventData.target.selectedValue,
+        selectedText: eventData.target.selectedText,
+        selectedIndex: eventData.target.selectedIndex,
+        name: eventData.target.name,
+        id: eventData.target.id,
+        totalOptions: eventData.target.allOptions.length,
+        timestamp: new Date(eventData.timestamp).toISOString()
+      });
+    }
+  }
+
   // Update event listeners to use capture phase
   document.addEventListener('click', recordEvent, true);
   document.addEventListener('mousedown', recordEvent, true);
@@ -675,6 +777,7 @@
       ['focus', recordEvent],
       ['blur', recordEvent],
       ['change', debouncedRecordInput],
+      // ['change', recordFormFieldData],  // CHANGED: Use specialized handler for change events
       ['submit', recordEvent],
       ['touchstart', recordEvent],
       ['touchend', recordEvent],
@@ -691,6 +794,9 @@
       console.log(`Added event listener for ${event}`);
     });
     
+    // ADDED: Specific listener for input events on form fields
+    document.addEventListener('blur', recordFormFieldData, true);
+
     // Add navigation event listeners
     window.addEventListener('popstate', handleNavigation);
     window.addEventListener('pushState', handleNavigation);
@@ -709,9 +815,20 @@
 
   // Create debounced version of recordInput with longer delay
   const debouncedRecordInput = debounce((e) => {
-    // Only record input events if the value has actually changed
+    // First, do the regular event recording
     if (e.target.value !== lastEventData.lastInputValue) {
       recordEvent(e);
+    }
+
+    // ADDED: Also capture specialized form field data for textboxes and dropdowns
+    const element = e.target;
+    const tagName = element.tagName.toLowerCase();
+    const inputType = element.type ? element.type.toLowerCase() : '';
+
+    if ((tagName === 'input' && ['text', 'email', 'password', 'search', 'tel', 'url', 'number'].includes(inputType)) || 
+        tagName === 'textarea' || 
+        tagName === 'select') {
+      recordFormFieldData(e);
     }
   }, 500); // Increased to 500ms debounce
 
